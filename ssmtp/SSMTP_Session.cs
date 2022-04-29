@@ -1,12 +1,8 @@
-﻿using System;
-using System.Collections;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Collections;
 using System.Net.Sockets;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
-using System.Threading.Tasks;
 
 namespace ssmtp
 {
@@ -16,7 +12,8 @@ namespace ssmtp
         private readonly SSMTP_Server m_SsmtpServer; // ref to SSMTP server
         private readonly string m_SessionId = "";
         private string m_Username = "";
-        private string m_ConnectedIp = "";
+        private string m_ConnectedIP = "";
+        private string m_ConnectedHostName = "";
         private string m_ReversePath = "";
         private Hashtable m_ForwardPath;
         private bool m_Authenticated = false;
@@ -37,7 +34,8 @@ namespace ssmtp
         {
             try
             {
-                m_ConnectedIp = GetIpFromEndPoint(RemoteEndpoint.ToString());
+                m_ConnectedIP = GetIpFromEndPoint(RemoteEndpoint.ToString());
+                m_ConnectedHostName = Dns.GetHostEntry(m_ConnectedIP).HostName;
 
                 while (true)
                 {
@@ -54,7 +52,7 @@ namespace ssmtp
                 if (m_ClientSocket.Connected)
                     SendData("->Service not available ^^\r\n");
                 else
-                    Console.WriteLine("Connection is aborted!", m_SessionId, m_ConnectedIp, "x");
+                    Console.WriteLine("Connection is aborted!", m_SessionId, m_ConnectedIP, "x");
                 Console.WriteLine("Exception caught: " + _.ToString());
             }
             finally
@@ -141,14 +139,14 @@ namespace ssmtp
 
         private void HELO(string argsText)
         {
-            SendData("->250 " + Dns.GetHostName() + " Hello [" + m_ConnectedIp + "]\r\n");
+            SendData("->250 " + Dns.GetHostName() + " Hello [" + m_ConnectedIP + "]\r\n");
             m_Helo_ok = true;
         }
 
         private void EHLO(string argsText)
         {
             var reply = "" +
-                        "250-" + Dns.GetHostName() + " Hello [" + m_ConnectedIp + "]\r\n" +
+                        "250-" + Dns.GetHostName() + " Hello [" + m_ConnectedIP + "]\r\n" +
                         "250-PIPELINING\r\n" +
                         "250-SIZE " + m_SsmtpServer.MaxMessageSize + "\r\n" +
                         "250-8BITMIME\r\n" +
@@ -177,6 +175,7 @@ namespace ssmtp
             if (m_Authenticated)
             {
                 SendData("->Already authenticated!\r\n");
+                Console.WriteLine("->Already auth");
                 return;
             }
 
@@ -187,6 +186,7 @@ namespace ssmtp
             switch (param[0].ToUpper())
             {
                 case "PLAIN":
+                    Console.WriteLine("->Not implemented");
                     SendData("->Not implemented! ^^\r\n");
                     break;
                 case "LOGIN":
@@ -203,7 +203,10 @@ namespace ssmtp
                     m_Authenticated = m_SsmtpServer.AuthUser(username, password);
 
                     if (!m_Authenticated)
+                    {
+                        Console.WriteLine("->Auth failed");
                         SendData("->420 Authentication failed\r\n");
+                    }
                     else
                     {
                         m_Authenticated = true;
@@ -220,20 +223,15 @@ namespace ssmtp
             }
         }
 
-        private void ResetState()
-        {
-            m_ForwardPath.Clear();
-            m_ReversePath = "";
-        }
-
         private void MAIL(string argsText)
         {
             if (!m_Authenticated)
             {
                 SendData("-> You must AUTH first!\r\n");
+                Console.WriteLine("->No Auth");
                 return;
             }
-            if (!CanMail)
+            if (!CanMAIL)
             {
                 if (m_MailFrom_ok)
                 {
@@ -261,11 +259,13 @@ namespace ssmtp
             if (!tmp.Success)
             {
                 SendData("-> Error in params, syntax is:{MAIL FROM:<address>}\r\n");
+                Console.WriteLine("->Param error");
                 return;
             }
             if (tmp.Result("${value}").Length == 0)
             {
                 SendData("-> Address not specified\r\n");
+                Console.WriteLine("->No address specified");
                 return;
             }
 
@@ -273,7 +273,7 @@ namespace ssmtp
                 reversePath = tmp.Result("${value}");
 
             senderEmail = reversePath;
-            
+
             // need to check senderEmail
             SendData("-> OK <" + senderEmail + "> sender ok\r\n");
             ResetState();
@@ -287,18 +287,21 @@ namespace ssmtp
             if (!m_Authenticated)
             {
                 SendData("->You must AUTH first\r\n");
+                Console.WriteLine("Not AUTH");
                 return;
             }
 
             if (!CanRCPT)
             {
                 SendData("-> BAD BAD BAD BOY!\r\n");
+                Console.WriteLine("->Bad sequence of commands");
                 return;
             }
 
             if (m_ForwardPath.Count > m_SsmtpServer.MaxRecipients)
             {
                 SendData("-> Too many recipients\r\n");
+                Console.WriteLine("->Too many recipients");
                 return;
             }
 
@@ -315,18 +318,21 @@ namespace ssmtp
             if (!tmp.Success)
             {
                 SendData("->Error in params, Syntax:{RCPT TO:<address>}\r\n");
+                Console.WriteLine("->Param error");
                 return;
             }
 
             if (!tmp.Result("${param}").ToUpper().Equals("TO"))
             {
                 SendData("->Error in params, Syntax:{RCPT TO:<address>}\r\n");
+                Console.WriteLine("->Param error");
                 return;
             }
 
             if (tmp.Result("${value}").Length == 0)
             {
                 SendData("->Recipients is not specified\r\n");
+                Console.WriteLine("->No recipients");
                 return;
             }
 
@@ -341,11 +347,168 @@ namespace ssmtp
                 m_ForwardPath.Add(recipientEmail, forwardPath);
 
             SendData("->OK <" + recipientEmail + "> Recipient ok\r\n");
+            m_RcptTo_ok = true;
         }
 
         private void DATA(string argsText)
         {
+            if (argsText.Length > 0)
+            {
+                SendData("->Syntax error, Syntax: {DATA}\r\n");
+                Console.WriteLine("->Syntax Error");
+                return;
+            }
 
+            if (!CanDATA)
+            {
+                SendData("->Bad bad bad boy\r\n");
+                Console.WriteLine("->Bad sequence of commands");
+                return;
+            }
+
+            if (m_ForwardPath.Count == 0)
+            {
+                SendData("->No valid recipients given\r\n");
+                Console.WriteLine("->No valid recipients");
+                return;
+            }
+
+            SendData("->Start mail input; end with <CRLF>.<CRLF>\r\n");
+
+            byte[] headers = null;
+            var header = "Received: from " + m_ConnectedHostName + " (" + m_ConnectedIP + ")\r\n";
+            header += "\tby " + System.Net.Dns.GetHostName() + " with SMTP; " + DateTime.Now.ToUniversalTime().ToString("r", System.Globalization.DateTimeFormatInfo.InvariantInfo) + "\r\n";
+
+            headers = System.Text.Encoding.ASCII.GetBytes(header.ToCharArray());
+            MemoryStream reply = null;
+            ReadReplyCode replyCode = ReadData(m_ClientSocket, out reply, headers, m_SsmtpServer.MaxMessageSize,
+                "\r\n.\r\n", ".\r\n");
+            if (replyCode == ReadReplyCode.Ok)
+            {
+                var receivedCount = reply.Length;
+                using (MemoryStream msgStream = DoPeriodHandling(reply, false))
+                {
+                    reply.Close();
+                    
+                    var message = Encoding.ASCII.GetString(msgStream.ToArray());
+                    Console.WriteLine("Message received:\n" + message);
+
+                    // store message
+                    using (FileStream file = new FileStream("msg.bin", FileMode.Create, FileAccess.Write))
+                    {
+                        var bytes = new byte[msgStream.Length];
+                        msgStream.Read(bytes, 0, (int)msgStream.Length);
+                        file.Write(bytes, 0, bytes.Length);
+                        msgStream.Close();
+                    }
+
+                    SendData("->Ok message received\r\n");
+                }
+
+                ResetState();
+            }
+            else
+            {
+                if (replyCode == ReadReplyCode.LengthExceeded)
+                    SendData("->Exceeded storage allocation\r\n");
+                else 
+                    SendData("->Mail not end with <CRLF>.<CRLF>");
+            }
+        }
+
+        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove)
+        {
+            return DoPeriodHandling(stream, addRemove, true);
+        }
+
+        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove, bool setStreamPosTo0)
+        {
+            MemoryStream replyData = new MemoryStream();
+
+            var crlf = new byte[] { (byte)'\r', (byte)'\n' };
+            if (setStreamPosTo0)
+                stream.Position = 0;
+
+            StreamLineReader r = new StreamLineReader(stream);
+            byte[] line = r.ReadLine();
+
+            while (line != null)
+            {
+                if (line.Length > 0)
+                {
+                    if (line[0] == (byte)'.')
+                    {
+                        if (addRemove)
+                        {
+                            replyData.WriteByte((byte)'.');
+                            replyData.Write(line, 0, line.Length);
+                        }
+                        else
+                            replyData.Write(line, 1, line.Length - 1);
+                    }
+                    else
+                    {
+                       replyData.Write(line, 0, line.Length);
+                    }
+                }
+                replyData.Write(crlf, 0, crlf.Length);
+                line = r.ReadLine();
+            }
+            replyData.Position = 0;
+            return replyData;
+        }
+
+        public static ReadReplyCode ReadData(Socket socket, out MemoryStream replyData, byte[] addData, int maxLength,
+            string terminator, string removeFromEnd)
+        {
+            ReadReplyCode replyCode = ReadReplyCode.Ok;
+            replyData = null;
+
+            try
+            {
+                replyData = new MemoryStream();
+                // write header
+                replyData.Write(addData, 0, addData.Length);
+                FixedStack stack = new FixedStack(terminator);
+                var nextReadWritelen = 1;
+
+                var lastDataTime = DateTime.Now.Ticks;
+                while (nextReadWritelen > 0)
+                {
+                    if (socket.Available >= nextReadWritelen)
+                    {
+                        var b = new byte[nextReadWritelen];
+                        var countReceived = socket.Receive(b);
+
+                        if (replyCode != ReadReplyCode.LengthExceeded)
+                            replyData.Write(b, 0, countReceived);
+
+                        nextReadWritelen = stack.Push(b, countReceived);
+
+                        if (replyCode != ReadReplyCode.LengthExceeded && replyData.Length > maxLength)
+                            replyCode = ReadReplyCode.LengthExceeded;
+
+                        lastDataTime = DateTime.Now.Ticks;
+                    }
+                    else
+                    {
+                        // timeout stuff if you want to implement ^^
+                    }
+                }
+                if (replyCode == ReadReplyCode.Ok && removeFromEnd.Length > 0)
+                    replyData.SetLength(replyData.Length - removeFromEnd.Length);
+            }
+            catch
+            {
+                replyCode = ReadReplyCode.UnknownError;
+            }
+            return replyCode;
+        }
+
+        private void ResetState()
+        {
+            m_ForwardPath.Clear();
+            m_ReversePath = "";
         }
 
         private string GetArgsText(string input, string cmdTxtToRemove)
@@ -423,7 +586,7 @@ namespace ssmtp
             Console.WriteLine("-> OK");
         }
 
-        private bool CanMail
+        private bool CanMAIL
         {
             get { return m_Helo_ok && !m_MailFrom_ok; }
         }
@@ -431,6 +594,11 @@ namespace ssmtp
         private bool CanRCPT
         {
             get { return m_MailFrom_ok; }
+        }
+
+        private bool CanDATA
+        {
+            get { return m_RcptTo_ok; }
         }
     }
 }
