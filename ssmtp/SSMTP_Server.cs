@@ -37,39 +37,35 @@ namespace ssmtp
 
         public void Start()
         {
-            if (!m_enable)
-            {
-                m_SessionTable = new Hashtable();
+            if (m_enable) return;
+            m_SessionTable = new Hashtable();
 
-                Thread startSSMTPServer = new Thread(new ThreadStart(Run));
-                startSSMTPServer.Start();
-            }
+            var startSSMTPServer = new Thread(new ThreadStart(Run));
+            startSSMTPServer.Start();
         }
 
         private void Stop()
         {
-            if (SSmtp_Listener != null)
-                SSmtp_Listener.Stop();
+            SSmtp_Listener?.Stop();
         }
 
         private void Run()
         {
-            if (m_IPAddress.Equals("All"))
-                SSmtp_Listener = new TcpListener(IPAddress.Any, m_Port);
-            else
-                SSmtp_Listener = new TcpListener(IPAddress.Parse(m_IPAddress), m_Port);
+            SSmtp_Listener = m_IPAddress.Equals("All")
+                             ? new TcpListener(IPAddress.Any, m_Port)
+                             : new TcpListener(IPAddress.Parse(m_IPAddress), m_Port);
             SSmtp_Listener.Start();
 
             while(true)
             {
                 if (m_SessionTable.Count <= m_MaxThread)
                 {
-                    Socket clientSocket = SSmtp_Listener.AcceptSocket();
-                    string sessionID = clientSocket.GetHashCode().ToString();
+                    var clientSocket = SSmtp_Listener.AcceptSocket();
+                    var sessionID = clientSocket.GetHashCode().ToString();
 
-                    SSMTP_Session session = new SSMTP_Session(clientSocket, this, sessionID);
+                    var session = new SsmtpSession(clientSocket, this, sessionID);
 
-                    Thread clientThread = new Thread(new ThreadStart(session.StartProcessing));
+                    var clientThread = new Thread(new ThreadStart(session.StartProcessing));
                     AddSession(sessionID, session);
                     clientThread.Start();
                 }
@@ -78,7 +74,7 @@ namespace ssmtp
             }
         }
 
-        internal void AddSession(string sessionID, SSMTP_Session session)
+        private void AddSession(string sessionID, SsmtpSession session)
         {
             m_SessionTable.Add(sessionID, session);
 
@@ -98,9 +94,29 @@ namespace ssmtp
             }
         }
 
+        internal bool AuthUser(string userName, string password)
+        {
+            if (!File.Exists("userdata.txt"))
+                File.Create("userdata.txt");
+            var userdata = File.ReadAllLines("userdata.txt");
+            foreach (var user in userdata)
+            {
+                var userAndPassword = user.Split(new char[] { ':' });
+                if (userName.Equals(userAndPassword[0]) && password.Equals(userAndPassword[1]))
+                    return true;
+            }
+            // to do
+            return false;
+        }
+
         public int MaxMessageSize
         {
             get { return m_MaxMessageSize; }
+        }
+
+        public int MaxRecipients
+        {
+            get { return m_MaxRecipients; }
         }
     }
 }
