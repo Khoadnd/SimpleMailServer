@@ -6,10 +6,12 @@ using System.Threading.Tasks;
 using System.Net;
 using System.Net.Sockets;
 using System.Collections;
+using System.IO;
+using System.Reflection.PortableExecutable;
 
 namespace ssmtp
 {
-    public class SSMTP_Server : IDisposable
+    public class SSMTP_Server
     {
         private TcpListener? SSmtp_Listener = null;
         private Hashtable m_SessionTable = null;
@@ -19,6 +21,7 @@ namespace ssmtp
         private bool m_enable = false; // State of listener
         private int m_MaxMessageSize = 1000000; // Maximun message size
         private int m_MaxRecipients = 100; // Max recipients
+        private List<string> m_domainList = null;
 
         public SSMTP_Server()
         {
@@ -27,10 +30,34 @@ namespace ssmtp
 
         private void InitializeComponent()
         {
+            m_domainList = new List<string>();
+            Directory.CreateDirectory("queue");
+            Directory.CreateDirectory("domains");
+            if (!File.Exists("domains.txt"))
+                File.Create("domains.txt");
 
+            foreach (var domain in File.ReadAllLines("domains.txt"))
+            {
+                m_domainList.Add(domain);
+                Directory.CreateDirectory("domains/" + domain);
+
+                if (!File.Exists("domains/" + domain + "/userdata.txt"))
+                    File.Create("domains/" + domain + "/userdata.txt").Close();
+
+
+                foreach (var userdata in File.ReadAllLines("domains/" + domain + "/userdata.txt"))
+                {
+                    var username = userdata.Trim().Split(':')[0];
+                    Directory.CreateDirectory("domains/" + domain + "/" + username);
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
+                }
+            }
         }
 
-        public void Dispose()
+        ~SSMTP_Server()
         {
             Stop();
         }
@@ -56,7 +83,7 @@ namespace ssmtp
                              : new TcpListener(IPAddress.Parse(m_IPAddress), m_Port);
             SSmtp_Listener.Start();
 
-            while(true)
+            while (true)
             {
                 if (m_SessionTable.Count <= m_MaxThread)
                 {
@@ -83,7 +110,7 @@ namespace ssmtp
 
         internal void RemoveSession(string sessionID)
         {
-            lock(m_SessionTable)
+            lock (m_SessionTable)
             {
                 if (!m_SessionTable.Contains(sessionID))
                 {
@@ -94,19 +121,66 @@ namespace ssmtp
             }
         }
 
-        internal bool AuthUser(string userName, string password)
+        internal bool AuthUser(string userDomain, string password)
         {
-            if (!File.Exists("userdata.txt"))
-                File.Create("userdata.txt");
-            var userdata = File.ReadAllLines("userdata.txt");
+            if (!userDomain.Contains('@'))
+                return false;
+
+            var domain = userDomain.Trim().Split('@')[1];
+            var userName = userDomain.Trim().Split('@')[0];
+            if (domain.Length == 0)
+                return false;
+
+            if (!m_domainList.Contains(domain))
+                return false;
+
+            var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
             foreach (var user in userdata)
             {
                 var userAndPassword = user.Split(new char[] { ':' });
-                if (userName.Equals(userAndPassword[0]) && password.Equals(userAndPassword[1]))
-                    return true;
+                if (userName.Equals(userAndPassword[0]) && password.Equals(userAndPassword[1])) ;
+                return true;
             }
-            // to do
             return false;
+        }
+
+        internal bool ValidateUser(string userDomain)
+        {
+            if (!userDomain.Contains('@'))
+                return false;
+
+            var domain = userDomain.Trim().Split('@')[1];
+            var username = userDomain.Trim().Split('@')[0];
+
+            if (domain.Length == 0)
+                return false;
+
+            if (!m_domainList.Contains(domain))
+                return false;
+
+            var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
+            foreach (var user in userdata)
+                if (username.Equals(user.Split(':')[0]))
+                    return true;
+
+            return false;
+        }
+
+        public void AddDomain(string domain)
+        {
+            File.AppendAllText("domains.txt", domain + Environment.NewLine);
+            Directory.CreateDirectory("domains/" + domain);
+            m_domainList.Add(domain);
+        }
+
+        public void AddUserToDomain(string username, string password, string domain)
+        {
+            File.AppendAllText("domains/" + domain + "/userdata.txt", username + ":" + password + Environment.NewLine);
+            Directory.CreateDirectory("domains/" + domain + "/" + username);
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
         }
 
         public int MaxMessageSize

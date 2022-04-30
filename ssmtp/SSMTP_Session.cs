@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Linq;
 
 namespace ssmtp
 {
@@ -12,15 +13,16 @@ namespace ssmtp
         private readonly SSMTP_Server m_SsmtpServer; // ref to SSMTP server
         private readonly string m_SessionId = "";
         private string m_Username = "";
+        private string m_Domain = "";
         private string m_ConnectedIP = "";
-        private string m_ConnectedHostName = "";
+        private string m_ConnectedHostName = ""; // never use :v
         private string m_ReversePath = "";
         private Hashtable m_ForwardPath;
         private bool m_Authenticated = false;
         private bool m_MailFrom_ok = false;
         private bool m_Helo_ok = false;
         private bool m_RcptTo_ok = false;
-        private MemoryStream m_MsgStream = null;
+        private MemoryStream m_MsgStream = null; // this too
 
         internal SsmtpSession(Socket clientSocket, SSMTP_Server server, string sesisonId)
         {
@@ -35,7 +37,7 @@ namespace ssmtp
             try
             {
                 m_ConnectedIP = GetIpFromEndPoint(RemoteEndpoint.ToString());
-                m_ConnectedHostName = Dns.GetHostEntry(m_ConnectedIP).HostName;
+                //m_ConnectedHostName = Dns.GetHostEntry(m_ConnectedIP).HostName;
 
                 while (true)
                 {
@@ -211,7 +213,8 @@ namespace ssmtp
                     {
                         m_Authenticated = true;
                         SendData("->Authenticated!\r\n");
-                        m_Username = username;
+                        m_Username = username.Trim().Split('@')[0];
+                        m_Domain = username.Trim().Split('@')[1];
                     }
                     break;
                 case "CRAM-MD5":
@@ -273,6 +276,12 @@ namespace ssmtp
                 reversePath = tmp.Result("${value}");
 
             senderEmail = reversePath;
+            if (reversePath.Split('@')[0] != m_Username || reversePath.Split('@')[1] != m_Domain)
+            {
+                SendData("-> No sender not ok\r\n");
+                ResetState();
+                return;
+            }
 
             // need to check senderEmail
             SendData("-> OK <" + senderEmail + "> sender ok\r\n");
@@ -331,13 +340,20 @@ namespace ssmtp
 
             if (tmp.Result("${value}").Length == 0)
             {
-                SendData("->Recipients is not specified\r\n");
-                Console.WriteLine("->No recipients");
+                SendData("->Recipient is not specified\r\n");
+                Console.WriteLine("->No recipient");
                 return;
             }
 
             forwardPath = tmp.Result("${value}");
             recipientEmail = forwardPath;
+
+            if (!m_SsmtpServer.ValidateUser(recipientEmail))
+            {
+                SendData("->Recipient is not found\r\n");
+                Console.WriteLine("->Invalid recipient\r\n");
+                return;
+            }
 
             // need to check mail size
             // need to validate mail
@@ -345,6 +361,12 @@ namespace ssmtp
 
             if (!m_ForwardPath.Contains(recipientEmail))
                 m_ForwardPath.Add(recipientEmail, forwardPath);
+            else
+            {
+                SendData("->Recipient already specified!\r\n");
+                m_RcptTo_ok = true;
+                return;
+            }
 
             SendData("->OK <" + recipientEmail + "> Recipient ok\r\n");
             m_RcptTo_ok = true;
@@ -376,10 +398,16 @@ namespace ssmtp
             SendData("->Start mail input; end with <CRLF>.<CRLF>\r\n");
 
             byte[] headers = null;
-            var header = "Received: from " + m_ConnectedHostName + " (" + m_ConnectedIP + ")\r\n";
-            header += "\tby " + System.Net.Dns.GetHostName() + " with SMTP; " + DateTime.Now.ToUniversalTime().ToString("r", System.Globalization.DateTimeFormatInfo.InvariantInfo) + "\r\n";
+
+            string header = "";
+
+            header += "Send at: " + DateTime.Now + "\r\nFROM: " + m_ReversePath + "\r\nTO: ";
+            foreach (DictionaryEntry o in m_ForwardPath)
+                header += o.Value + " ";
+            header += "\r\n\r\n";
 
             headers = System.Text.Encoding.ASCII.GetBytes(header.ToCharArray());
+
             MemoryStream reply = null;
             ReadReplyCode replyCode = ReadData(m_ClientSocket, out reply, headers, m_SsmtpServer.MaxMessageSize,
                 "\r\n.\r\n", ".\r\n");
@@ -389,16 +417,17 @@ namespace ssmtp
                 using (MemoryStream msgStream = DoPeriodHandling(reply, false))
                 {
                     reply.Close();
-                    
+
                     var message = Encoding.ASCII.GetString(msgStream.ToArray());
                     Console.WriteLine("Message received:\n" + message);
 
                     // store message
-                    using (FileStream file = new FileStream("msg.bin", FileMode.Create, FileAccess.Write))
+                    using (var file = new FileStream("queue/" + m_SessionId + ".txt", FileMode.Create, FileAccess.Write))
                     {
                         var bytes = new byte[msgStream.Length];
                         msgStream.Read(bytes, 0, (int)msgStream.Length);
                         file.Write(bytes, 0, bytes.Length);
+                        File.WriteAllBytes("domains/" + m_Domain + "/" + m_Username + "/Sent/" + m_SessionId + ".txt", bytes);
                         msgStream.Close();
                     }
 
@@ -411,7 +440,7 @@ namespace ssmtp
             {
                 if (replyCode == ReadReplyCode.LengthExceeded)
                     SendData("->Exceeded storage allocation\r\n");
-                else 
+                else
                     SendData("->Mail not end with <CRLF>.<CRLF>");
             }
         }
@@ -448,7 +477,7 @@ namespace ssmtp
                     }
                     else
                     {
-                       replyData.Write(line, 0, line.Length);
+                        replyData.Write(line, 0, line.Length);
                     }
                 }
                 replyData.Write(crlf, 0, crlf.Length);
