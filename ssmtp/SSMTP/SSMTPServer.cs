@@ -9,9 +9,9 @@ using System.Collections;
 using System.IO;
 using System.Reflection.PortableExecutable;
 
-namespace ssmtp
+namespace SSMTP
 {
-    public class SSMTP_Server
+    public class SSMTPServer
     {
         private TcpListener? SSmtp_Listener = null;
         private Hashtable m_SessionTable = null;
@@ -23,7 +23,7 @@ namespace ssmtp
         private int m_MaxRecipients = 100; // Max recipients
         private List<string> m_domainList = null;
 
-        public SSMTP_Server()
+        public SSMTPServer()
         {
             InitializeComponent();
         }
@@ -34,7 +34,8 @@ namespace ssmtp
             Directory.CreateDirectory("queue");
             Directory.CreateDirectory("domains");
             if (!File.Exists("domains.txt"))
-                File.Create("domains.txt");
+                File.Create("domains.txt").Close();
+            
 
             foreach (var domain in File.ReadAllLines("domains.txt"))
             {
@@ -57,7 +58,7 @@ namespace ssmtp
             }
         }
 
-        ~SSMTP_Server()
+        ~SSMTPServer()
         {
             Stop();
         }
@@ -90,7 +91,7 @@ namespace ssmtp
                     var clientSocket = SSmtp_Listener.AcceptSocket();
                     var sessionID = clientSocket.GetHashCode().ToString();
 
-                    var session = new SsmtpSession(clientSocket, this, sessionID);
+                    var session = new SSMTPSession(clientSocket, this, sessionID);
 
                     var clientThread = new Thread(new ThreadStart(session.StartProcessing));
                     AddSession(sessionID, session);
@@ -101,7 +102,7 @@ namespace ssmtp
             }
         }
 
-        private void AddSession(string sessionID, SsmtpSession session)
+        private void AddSession(string sessionID, SSMTPSession session)
         {
             m_SessionTable.Add(sessionID, session);
 

@@ -4,13 +4,14 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Linq;
+using Core;
 
-namespace ssmtp
+namespace SSMTP
 {
-    public class SsmtpSession
+    public class SSMTPSession
     {
         private readonly Socket m_ClientSocket; // ref to Client socket
-        private readonly SSMTP_Server m_SsmtpServer; // ref to SSMTP server
+        private readonly SSMTPServer m_SsmtpServer; // ref to SSMTP server
         private readonly string m_SessionId = "";
         private string m_Username = "";
         private string m_Domain = "";
@@ -24,7 +25,7 @@ namespace ssmtp
         private bool m_RcptTo_ok = false;
         private MemoryStream m_MsgStream = null; // this too
 
-        internal SsmtpSession(Socket clientSocket, SSMTP_Server server, string sesisonId)
+        internal SSMTPSession(Socket clientSocket, SSMTPServer server, string sesisonId)
         {
             m_ClientSocket = clientSocket;
             m_SsmtpServer = server;
@@ -409,12 +410,12 @@ namespace ssmtp
             headers = System.Text.Encoding.ASCII.GetBytes(header.ToCharArray());
 
             MemoryStream reply = null;
-            ReadReplyCode replyCode = ReadData(m_ClientSocket, out reply, headers, m_SsmtpServer.MaxMessageSize,
+            ReadReplyCode replyCode = Core.ServerCore.ReadData(m_ClientSocket, out reply, headers, m_SsmtpServer.MaxMessageSize,
                 "\r\n.\r\n", ".\r\n");
             if (replyCode == ReadReplyCode.Ok)
             {
                 var receivedCount = reply.Length;
-                using (MemoryStream msgStream = DoPeriodHandling(reply, false))
+                using (MemoryStream msgStream = Core.ServerCore.DoPeriodHandling(reply, false))
                 {
                     reply.Close();
 
@@ -443,95 +444,6 @@ namespace ssmtp
                 else
                     SendData("->Mail not end with <CRLF>.<CRLF>");
             }
-        }
-
-        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove)
-        {
-            return DoPeriodHandling(stream, addRemove, true);
-        }
-
-        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove, bool setStreamPosTo0)
-        {
-            MemoryStream replyData = new MemoryStream();
-
-            var crlf = new byte[] { (byte)'\r', (byte)'\n' };
-            if (setStreamPosTo0)
-                stream.Position = 0;
-
-            StreamLineReader r = new StreamLineReader(stream);
-            byte[] line = r.ReadLine();
-
-            while (line != null)
-            {
-                if (line.Length > 0)
-                {
-                    if (line[0] == (byte)'.')
-                    {
-                        if (addRemove)
-                        {
-                            replyData.WriteByte((byte)'.');
-                            replyData.Write(line, 0, line.Length);
-                        }
-                        else
-                            replyData.Write(line, 1, line.Length - 1);
-                    }
-                    else
-                    {
-                        replyData.Write(line, 0, line.Length);
-                    }
-                }
-                replyData.Write(crlf, 0, crlf.Length);
-                line = r.ReadLine();
-            }
-            replyData.Position = 0;
-            return replyData;
-        }
-
-        public static ReadReplyCode ReadData(Socket socket, out MemoryStream replyData, byte[] addData, int maxLength,
-            string terminator, string removeFromEnd)
-        {
-            ReadReplyCode replyCode = ReadReplyCode.Ok;
-            replyData = null;
-
-            try
-            {
-                replyData = new MemoryStream();
-                // write header
-                replyData.Write(addData, 0, addData.Length);
-                FixedStack stack = new FixedStack(terminator);
-                var nextReadWritelen = 1;
-
-                var lastDataTime = DateTime.Now.Ticks;
-                while (nextReadWritelen > 0)
-                {
-                    if (socket.Available >= nextReadWritelen)
-                    {
-                        var b = new byte[nextReadWritelen];
-                        var countReceived = socket.Receive(b);
-
-                        if (replyCode != ReadReplyCode.LengthExceeded)
-                            replyData.Write(b, 0, countReceived);
-
-                        nextReadWritelen = stack.Push(b, countReceived);
-
-                        if (replyCode != ReadReplyCode.LengthExceeded && replyData.Length > maxLength)
-                            replyCode = ReadReplyCode.LengthExceeded;
-
-                        lastDataTime = DateTime.Now.Ticks;
-                    }
-                    else
-                    {
-                        // timeout stuff if you want to implement ^^
-                    }
-                }
-                if (replyCode == ReadReplyCode.Ok && removeFromEnd.Length > 0)
-                    replyData.SetLength(replyData.Length - removeFromEnd.Length);
-            }
-            catch
-            {
-                replyCode = ReadReplyCode.UnknownError;
-            }
-            return replyCode;
         }
 
         private void ResetState()

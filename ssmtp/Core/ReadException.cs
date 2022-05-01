@@ -1,7 +1,7 @@
 ﻿using System;
 
 
-namespace ssmtp
+namespace Core
 {
     public enum ReadReplyCode
     {

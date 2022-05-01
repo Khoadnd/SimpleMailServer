@@ -1,5 +1,4 @@
-﻿using ssmtp;
-
+﻿
 namespace Program
 {
     public static class Program
@@ -7,7 +6,7 @@ namespace Program
         public static void Main(string[] args)
         {
             // initialize server
-            SSMTP_Server server = new SSMTP_Server();
+            SSMTP.SSMTPServer server = new SSMTP.SSMTPServer();
             server.Start();
 
             // initialize mail delivery system
