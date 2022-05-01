@@ -10,14 +10,14 @@ namespace Core
 {
     public static class MsgDelivery
     {
+        private static FileSystemWatcher watcher = null;
         public static void CreateQueueWatcher()
         {
-            FileSystemWatcher watcher = new FileSystemWatcher();
+            watcher = new FileSystemWatcher();
             watcher.Filter = "*.*";
             watcher.Path = "queue/";
             watcher.EnableRaisingEvents = true;
             watcher.Created += new FileSystemEventHandler(watcher_FileCreated);
-
         }
 
         private static void watcher_FileCreated(object sender, FileSystemEventArgs e)
@@ -39,7 +39,7 @@ namespace Core
                 File.Copy(e.FullPath, "domains/" + domain + "/" + username + "/Inbox/" + e.Name, true);
                 Console.WriteLine("Delivered mail to " + path);
             }
-            //File.Delete(e.FullPath);
+            File.Delete(e.FullPath);
         }
     }
 }

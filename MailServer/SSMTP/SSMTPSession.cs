@@ -4,45 +4,47 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Linq;
+using System.Security.Cryptography;
 using Core;
+using Microsoft.VisualBasic;
 
 namespace SSMTP
 {
     public class SSMTPSession
     {
-        private readonly Socket m_ClientSocket; // ref to Client socket
-        private readonly SSMTPServer m_SsmtpServer; // ref to SSMTP server
-        private readonly string m_SessionId = "";
-        private string m_Username = "";
-        private string m_Domain = "";
-        private string m_ConnectedIP = "";
-        private string m_ConnectedHostName = ""; // never use :v
-        private string m_ReversePath = "";
-        private Hashtable m_ForwardPath;
-        private bool m_Authenticated = false;
-        private bool m_MailFrom_ok = false;
-        private bool m_Helo_ok = false;
-        private bool m_RcptTo_ok = false;
-        private MemoryStream m_MsgStream = null; // this too
+        private readonly Socket clientSocket; // ref to Client socket
+        private readonly SSMTPServer ssmtpServer; // ref to SSMTP server
+        private readonly string sessionID = "";
+        private string username = "";
+        private string domain = "";
+        private string connectedIP = "";
+        private string connectedHostName = ""; // never use :v
+        private string reversePath = "";
+        private Hashtable forwardPath;
+        private bool authenticated = false;
+        private bool mailFromOk = false;
+        private bool heloOk = false;
+        private bool rcptToOk = false;
+        private MemoryStream msgStream = null; // this too
 
         internal SSMTPSession(Socket clientSocket, SSMTPServer server, string sesisonId)
         {
-            m_ClientSocket = clientSocket;
-            m_SsmtpServer = server;
-            m_SessionId = sesisonId;
-            m_ForwardPath = new Hashtable();
+            this.clientSocket = clientSocket;
+            ssmtpServer = server;
+            sessionID = sesisonId;
+            forwardPath = new Hashtable();
         }
 
         public void StartProcessing()
         {
             try
             {
-                m_ConnectedIP = GetIpFromEndPoint(RemoteEndpoint.ToString());
-                //m_ConnectedHostName = Dns.GetHostEntry(m_ConnectedIP).HostName;
+                connectedIP = GetIpFromEndPoint(RemoteEndpoint.ToString());
+                //connectedHostName = Dns.GetHostEntry(connectedIP).HostName;
 
                 while (true)
                 {
-                    if (m_ClientSocket.Available > 0)
+                    if (clientSocket.Available > 0)
                     {
                         var lastCmd = ReadLine();
                         if (SwitchCommand(lastCmd))
@@ -52,20 +54,20 @@ namespace SSMTP
             }
             catch (Exception _)
             {
-                if (m_ClientSocket.Connected)
+                if (clientSocket.Connected)
                     SendData("->Service not available ^^\r\n");
                 else
-                    Console.WriteLine("Connection is aborted!", m_SessionId, m_ConnectedIP, "x");
+                    Console.WriteLine("Connection is aborted!", sessionID, connectedIP, "x");
                 Console.WriteLine("Exception caught: " + _.ToString());
             }
             finally
             {
-                m_SsmtpServer.RemoveSession(m_SessionId);
+                ssmtpServer.RemoveSession(sessionID);
 
-                if (m_ClientSocket.Connected)
-                    m_ClientSocket.Close();
+                if (clientSocket.Connected)
+                    clientSocket.Close();
 
-                Console.WriteLine("Session " + m_SessionId + " disconnected! " + DateTime.Now);
+                Console.WriteLine("Session " + sessionID + " disconnected! " + DateTime.Now);
             }
         }
 
@@ -142,16 +144,16 @@ namespace SSMTP
 
         private void HELO(string argsText)
         {
-            SendData("->250 " + Dns.GetHostName() + " Hello [" + m_ConnectedIP + "]\r\n");
-            m_Helo_ok = true;
+            SendData("->250 " + Dns.GetHostName() + " Hello [" + connectedIP + "]\r\n");
+            heloOk = true;
         }
 
         private void EHLO(string argsText)
         {
             var reply = "" +
-                        "250-" + Dns.GetHostName() + " Hello [" + m_ConnectedIP + "]\r\n" +
+                        "250-" + Dns.GetHostName() + " Hello [" + connectedIP + "]\r\n" +
                         "250-PIPELINING\r\n" +
-                        "250-SIZE " + m_SsmtpServer.MaxMessageSize + "\r\n" +
+                        "250-SIZE " + ssmtpServer.MaxMessageSize + "\r\n" +
                         "250-8BITMIME\r\n" +
                         "250-BINARYMIME\r\n" +
                         "250-CHUNKING\r\n" +
@@ -159,7 +161,7 @@ namespace SSMTP
                         "250 Ok\r\n";
 
             SendData(reply);
-            m_Helo_ok = true;
+            heloOk = true;
         }
 
         private void QUIT(string argsText)
@@ -175,7 +177,7 @@ namespace SSMTP
 
         private void AUTH(string argsText)
         {
-            if (m_Authenticated)
+            if (authenticated)
             {
                 SendData("->Already authenticated!\r\n");
                 Console.WriteLine("->Already auth");
@@ -203,19 +205,19 @@ namespace SSMTP
                     if (passwordLine.Length > 0)
                         password = Encoding.Default.GetString(Convert.FromBase64String(passwordLine));
 
-                    m_Authenticated = m_SsmtpServer.AuthUser(username, password);
+                    authenticated = ssmtpServer.AuthUser(username, password);
 
-                    if (!m_Authenticated)
+                    if (!authenticated)
                     {
                         Console.WriteLine("->Auth failed");
                         SendData("->420 Authentication failed\r\n");
                     }
                     else
                     {
-                        m_Authenticated = true;
+                        authenticated = true;
                         SendData("->Authenticated!\r\n");
-                        m_Username = username.Trim().Split('@')[0];
-                        m_Domain = username.Trim().Split('@')[1];
+                        this.username = username.Trim().Split('@')[0];
+                        domain = username.Trim().Split('@')[1];
                     }
                     break;
                 case "CRAM-MD5":
@@ -229,7 +231,7 @@ namespace SSMTP
 
         private void MAIL(string argsText)
         {
-            if (!m_Authenticated)
+            if (!authenticated)
             {
                 SendData("-> You must AUTH first!\r\n");
                 Console.WriteLine("->No Auth");
@@ -237,7 +239,7 @@ namespace SSMTP
             }
             if (!CanMAIL)
             {
-                if (m_MailFrom_ok)
+                if (mailFromOk)
                 {
                     SendData("-> Sender already specified\r\n");
                     Console.WriteLine("->Sender already specified\r\n");
@@ -277,7 +279,7 @@ namespace SSMTP
                 reversePath = tmp.Result("${value}");
 
             senderEmail = reversePath;
-            if (reversePath.Split('@')[0] != m_Username || reversePath.Split('@')[1] != m_Domain)
+            if (reversePath.Split('@')[0] != username || reversePath.Split('@')[1] != domain)
             {
                 SendData("-> No sender not ok\r\n");
                 ResetState();
@@ -288,13 +290,13 @@ namespace SSMTP
             SendData("-> OK <" + senderEmail + "> sender ok\r\n");
             ResetState();
 
-            m_ReversePath = reversePath;
-            m_MailFrom_ok = true;
+            this.reversePath = reversePath;
+            mailFromOk = true;
         }
 
         private void RCPT(string argsText)
         {
-            if (!m_Authenticated)
+            if (!authenticated)
             {
                 SendData("->You must AUTH first\r\n");
                 Console.WriteLine("Not AUTH");
@@ -308,7 +310,7 @@ namespace SSMTP
                 return;
             }
 
-            if (m_ForwardPath.Count > m_SsmtpServer.MaxRecipients)
+            if (this.forwardPath.Count > ssmtpServer.MaxRecipients)
             {
                 SendData("-> Too many recipients\r\n");
                 Console.WriteLine("->Too many recipients");
@@ -349,7 +351,7 @@ namespace SSMTP
             forwardPath = tmp.Result("${value}");
             recipientEmail = forwardPath;
 
-            if (!m_SsmtpServer.ValidateUser(recipientEmail))
+            if (!ssmtpServer.ValidateUser(recipientEmail))
             {
                 SendData("->Recipient is not found\r\n");
                 Console.WriteLine("->Invalid recipient\r\n");
@@ -360,17 +362,17 @@ namespace SSMTP
             // need to validate mail
             // need to validate many things :v
 
-            if (!m_ForwardPath.Contains(recipientEmail))
-                m_ForwardPath.Add(recipientEmail, forwardPath);
+            if (!this.forwardPath.Contains(recipientEmail))
+                this.forwardPath.Add(recipientEmail, forwardPath);
             else
             {
                 SendData("->Recipient already specified!\r\n");
-                m_RcptTo_ok = true;
+                rcptToOk = true;
                 return;
             }
 
             SendData("->OK <" + recipientEmail + "> Recipient ok\r\n");
-            m_RcptTo_ok = true;
+            rcptToOk = true;
         }
 
         private void DATA(string argsText)
@@ -389,7 +391,7 @@ namespace SSMTP
                 return;
             }
 
-            if (m_ForwardPath.Count == 0)
+            if (forwardPath.Count == 0)
             {
                 SendData("->No valid recipients given\r\n");
                 Console.WriteLine("->No valid recipients");
@@ -402,34 +404,35 @@ namespace SSMTP
 
             string header = "";
 
-            header += "Send at: " + DateTime.Now + "\r\nFROM: " + m_ReversePath + "\r\nTO: ";
-            foreach (DictionaryEntry o in m_ForwardPath)
+            header += "Send at: " + DateTime.Now + "\r\nFROM: " + reversePath + "\r\nTO: ";
+            foreach (DictionaryEntry o in forwardPath)
                 header += o.Value + " ";
             header += "\r\n\r\n";
 
             headers = System.Text.Encoding.ASCII.GetBytes(header.ToCharArray());
 
             MemoryStream reply = null;
-            ReadReplyCode replyCode = Core.ServerCore.ReadData(m_ClientSocket, out reply, headers, m_SsmtpServer.MaxMessageSize,
+            ReadReplyCode replyCode = ServerCore.ReadData(clientSocket, out reply, headers, ssmtpServer.MaxMessageSize,
                 "\r\n.\r\n", ".\r\n");
             if (replyCode == ReadReplyCode.Ok)
             {
                 var receivedCount = reply.Length;
-                using (MemoryStream msgStream = Core.ServerCore.DoPeriodHandling(reply, false))
+                using (MemoryStream msgStream = ServerCore.DoPeriodHandling(reply, false))
                 {
                     reply.Close();
 
                     var message = Encoding.ASCII.GetString(msgStream.ToArray());
                     Console.WriteLine("Message received:\n" + message);
-
+                    var ex = DateTime.Now.Ticks;
                     // store message
-                    using (var file = new FileStream("queue/" + m_SessionId + ".txt", FileMode.Create, FileAccess.Write))
+                    using (var file = new FileStream("queue/" + sessionID + "-" + ex + ".txt", FileMode.Create, FileAccess.Write))
                     {
                         var bytes = new byte[msgStream.Length];
                         msgStream.Read(bytes, 0, (int)msgStream.Length);
                         file.Write(bytes, 0, bytes.Length);
-                        File.WriteAllBytes("domains/" + m_Domain + "/" + m_Username + "/Sent/" + m_SessionId + ".txt", bytes);
+                        File.WriteAllBytes("domains/" + domain + "/" + username + "/Sent/" + sessionID + "-" + ex + ".txt", bytes);
                         msgStream.Close();
+                        file.Close();
                     }
 
                     SendData("->Ok message received\r\n");
@@ -448,8 +451,8 @@ namespace SSMTP
 
         private void ResetState()
         {
-            m_ForwardPath.Clear();
-            m_ReversePath = "";
+            forwardPath.Clear();
+            reversePath = "";
         }
 
         private string GetArgsText(string input, string cmdTxtToRemove)
@@ -466,7 +469,7 @@ namespace SSMTP
 
         private EndPoint RemoteEndpoint
         {
-            get { return m_ClientSocket.RemoteEndPoint; }
+            get { return clientSocket.RemoteEndPoint; }
         }
 
         private string GetIpFromEndPoint(string x)
@@ -477,9 +480,9 @@ namespace SSMTP
         // Read data from socket
         private string ReadLine()
         {
-            var line = ReadLine(m_ClientSocket, 500);
+            var line = ReadLine(clientSocket, 500);
 
-            Console.WriteLine(m_SessionId + ": " + line + "<CRLF>");
+            Console.WriteLine(sessionID + ": " + line + "<CRLF>");
 
             return line;
         }
@@ -520,7 +523,7 @@ namespace SSMTP
         {
             var byteData = System.Text.Encoding.ASCII.GetBytes(data.ToCharArray());
 
-            var nCount = m_ClientSocket.Send(byteData, byteData.Length, 0);
+            var nCount = clientSocket.Send(byteData, byteData.Length, 0);
             if (nCount != byteData.Length)
                 throw new Exception("SendData not send enough data as requested!");
 
@@ -529,17 +532,17 @@ namespace SSMTP
 
         private bool CanMAIL
         {
-            get { return m_Helo_ok && !m_MailFrom_ok; }
+            get { return heloOk && !mailFromOk; }
         }
 
         private bool CanRCPT
         {
-            get { return m_MailFrom_ok; }
+            get { return mailFromOk; }
         }
 
         private bool CanDATA
         {
-            get { return m_RcptTo_ok; }
+            get { return rcptToOk; }
         }
     }
 }
