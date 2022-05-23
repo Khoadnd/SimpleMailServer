@@ -1,12 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Linq.Expressions;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
+﻿using System.Text.RegularExpressions;
 
-namespace Core
+namespace MailServer.Core
 {
     public static class MsgDelivery
     {
@@ -22,6 +16,7 @@ namespace Core
 
         private static void watcher_FileCreated(object sender, FileSystemEventArgs e)
         {
+            Thread.Sleep(100);
             // deliver mail stuff
             var exp = @"(?<param>TO)[\s]{0,}:\s{0,}(?<value>[\w\@\.\-\*\+\=\#\/\s]*)";
             var r = new Regex(exp, RegexOptions.IgnoreCase);

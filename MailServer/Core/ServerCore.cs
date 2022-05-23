@@ -1,101 +1,110 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace Core
+﻿
+namespace MailServer.Core
 {
-    public static class ServerCore
+    public static partial class ServerCore
     {
-        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove)
+        private static Dictionary<string, List<string>> domainAndUserList;
+        //public static List<string> domainList = null;
+
+        public static void InitializeComponent()
         {
-            return DoPeriodHandling(stream, addRemove, true);
+            domainAndUserList = new Dictionary<string, List<string>>();
+
+            Directory.CreateDirectory("queue");
+            Directory.CreateDirectory("domains");
+            if (!File.Exists("Domains.txt"))
+                File.Create("domains.txt");
+
+            foreach (var domain in File.ReadAllLines("domains.txt"))
+            {
+                Directory.CreateDirectory("domains/" + domain);
+
+                if (!File.Exists("domains/" + domain + "/userdata.txt"))
+                    File.Create("domains/" + domain + "/userdata.txt").Close();
+
+
+                foreach (var userdata in File.ReadAllLines("domains/" + domain + "/userdata.txt"))
+                {
+                    var username = userdata.Trim().Split(':')[0];
+                    Directory.CreateDirectory("domains/" + domain + "/" + username);
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
+
+                    domainAndUserList.AddOrUpdate(domain, userdata);
+                }
+            }
         }
 
-        public static MemoryStream DoPeriodHandling(Stream stream, bool addRemove, bool setStreamPosTo0)
+        private static void AddOrUpdate(this Dictionary<string, List<string>>? dic, string key, string entry)
         {
-            MemoryStream replyData = new MemoryStream();
+            if (!dic.ContainsKey(key))
+                dic.Add(key, new List<string>());
 
-            var crlf = new byte[] { (byte)'\r', (byte)'\n' };
-            if (setStreamPosTo0)
-                stream.Position = 0;
-
-            StreamLineReader r = new StreamLineReader(stream);
-            byte[] line = r.ReadLine();
-
-            while (line != null)
-            {
-                if (line.Length > 0)
-                {
-                    if (line[0] == (byte)'.')
-                    {
-                        if (addRemove)
-                        {
-                            replyData.WriteByte((byte)'.');
-                            replyData.Write(line, 0, line.Length);
-                        }
-                        else
-                            replyData.Write(line, 1, line.Length - 1);
-                    }
-                    else
-                    {
-                        replyData.Write(line, 0, line.Length);
-                    }
-                }
-                replyData.Write(crlf, 0, crlf.Length);
-                line = r.ReadLine();
-            }
-            replyData.Position = 0;
-            return replyData;
+            dic[key].Add(entry);
         }
 
-        public static ReadReplyCode ReadData(Socket socket, out MemoryStream replyData, byte[] addData, int maxLength,
-            string terminator, string removeFromEnd)
+        public static bool AuthUser(string userDomain, string pass)
         {
-            ReadReplyCode replyCode = ReadReplyCode.Ok;
-            replyData = null;
+            if (!userDomain.Contains('@'))
+                return false;
 
-            try
+            var domain = userDomain.Trim().Split('@')[1];
+            var username = userDomain.Trim().Split('@')[0];
+
+            return domain.Length != 0 &&
+                   domainAndUserList.ContainsKey(domain) &&
+                   domainAndUserList[domain].Contains(username + ":" + pass);
+        }
+
+        public static bool ValidateUser(string userDomain)
+        {
+            if (!userDomain.Contains('@'))
+                return false;
+
+            var domain = userDomain.Trim().Split('@')[1];
+            var username = userDomain.Trim().Split('@')[0];
+
+            return domain.Length != 0 &&
+                   domainAndUserList.ContainsKey(domain) &&
+                   domainAndUserList[domain].Any(x => x.Split(':')[0] == username);
+        }
+
+        public static void AddDomain(string domain)
+        {
+            if (domainAndUserList.ContainsKey(domain))
             {
-                replyData = new MemoryStream();
-                // write header
-                replyData.Write(addData, 0, addData.Length);
-                FixedStack stack = new FixedStack(terminator);
-                var nextReadWritelen = 1;
-
-                //var lastDataTime = DateTime.Now.Ticks;
-                while (nextReadWritelen > 0)
-                {
-                    if (socket.Available >= nextReadWritelen)
-                    {
-                        var b = new byte[nextReadWritelen];
-                        var countReceived = socket.Receive(b);
-
-                        if (replyCode != ReadReplyCode.LengthExceeded)
-                            replyData.Write(b, 0, countReceived);
-
-                        nextReadWritelen = stack.Push(b, countReceived);
-
-                        if (replyCode != ReadReplyCode.LengthExceeded && replyData.Length > maxLength)
-                            replyCode = ReadReplyCode.LengthExceeded;
-
-                        //lastDataTime = DateTime.Now.Ticks;
-                    }
-                    else
-                    {
-                        // timeout stuff if you want to implement ^^
-                    }
-                }
-                if (replyCode == ReadReplyCode.Ok && removeFromEnd.Length > 0)
-                    replyData.SetLength(replyData.Length - removeFromEnd.Length);
+                Console.WriteLine("Warning: " + domain + " already exists!");
+                throw new Exception("domain already exists!");
             }
-            catch
+            else
             {
-                replyCode = ReadReplyCode.UnknownError;
+                File.AppendAllText("domains.txt", domain + Environment.NewLine);
+                Directory.CreateDirectory("domains/" + domain);
+                domainAndUserList.Add(domain, new List<string>());
             }
-            return replyCode;
+        }
+
+        public static void AddUserToDomain(string username, string password, string domain)
+        {
+            if (!domainAndUserList.ContainsKey(domain))
+            {
+                Console.WriteLine("Warning: " + domain + " not found!");
+                throw new Exception("domain not found!");
+            }
+
+            if (domainAndUserList[domain].Any(x => x.Split(':')[0] == username))
+            {
+                Console.WriteLine("Warning: " + username + " already exists!");
+                throw new Exception("username already exists");
+            }
+            File.AppendAllText("domains/" + domain + "/userdata.txt", username + ":" + password + Environment.NewLine);
+            Directory.CreateDirectory("domains/" + domain + "/" + username);
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
         }
     }
 }

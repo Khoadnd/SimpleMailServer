@@ -1,7 +1,4 @@
-﻿using System;
-
-
-namespace Core
+﻿namespace MailServer.Core
 {
     public enum ReadReplyCode
     {
