@@ -1,15 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using System.Collections;
 using System.Net;
 using System.Net.Sockets;
-using System.Collections;
-using System.IO;
-using System.Reflection.PortableExecutable;
 
-namespace SSMTP
+namespace MailServer.SSMTP
 {
     public class SSMTPServer
     {
@@ -21,41 +14,41 @@ namespace SSMTP
         private bool enable = false; // State of listener
         private int maxMessageSize = 1000000; // Maximun message size
         private int maxRecipients = 100; // Max recipients
-        private List<string> domainList = null;
 
         public SSMTPServer()
         {
             InitializeComponent();
         }
 
+        // deprecated
         private void InitializeComponent()
         {
-            domainList = new List<string>();
-            Directory.CreateDirectory("queue");
-            Directory.CreateDirectory("domains");
-            if (!File.Exists("domains.txt"))
-                File.Create("domains.txt").Close();
-            
-
-            foreach (var domain in File.ReadAllLines("domains.txt"))
-            {
-                domainList.Add(domain);
-                Directory.CreateDirectory("domains/" + domain);
-
-                if (!File.Exists("domains/" + domain + "/userdata.txt"))
-                    File.Create("domains/" + domain + "/userdata.txt").Close();
+            //domainList = new List<string>();
+            //Directory.CreateDirectory("queue");
+            //Directory.CreateDirectory("domains");
+            //if (!File.Exists("domains.txt"))
+            //    File.Create("domains.txt").Close();
 
 
-                foreach (var userdata in File.ReadAllLines("domains/" + domain + "/userdata.txt"))
-                {
-                    var username = userdata.Trim().Split(':')[0];
-                    Directory.CreateDirectory("domains/" + domain + "/" + username);
-                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
-                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
-                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
-                    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
-                }
-            }
+            //foreach (var domain in File.ReadAllLines("domains.txt"))
+            //{
+            //    domainList.Add(domain);
+            //    Directory.CreateDirectory("domains/" + domain);
+
+            //    if (!File.Exists("domains/" + domain + "/userdata.txt"))
+            //        File.Create("domains/" + domain + "/userdata.txt").Close();
+
+
+            //    foreach (var userdata in File.ReadAllLines("domains/" + domain + "/userdata.txt"))
+            //    {
+            //        var username = userdata.Trim().Split(':')[0];
+            //        Directory.CreateDirectory("domains/" + domain + "/" + username);
+            //        Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+            //        Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+            //        Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+            //        Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
+            //    }
+            //}
         }
 
         ~SSMTPServer()
@@ -106,7 +99,7 @@ namespace SSMTP
         {
             sessionTable.Add(sessionID, session);
 
-            Console.WriteLine("Session: " + sessionID + " added " + DateTime.Now);
+            Console.WriteLine("SSMTP Session: " + sessionID + " added " + DateTime.Now);
         }
 
         internal void RemoveSession(string sessionID)
@@ -122,67 +115,63 @@ namespace SSMTP
             }
         }
 
-        internal bool AuthUser(string userDomain, string password)
-        {
-            if (!userDomain.Contains('@'))
-                return false;
+        // deprecated
+        //internal bool AuthUser(string userDomain, string password)
+        //{
+        //    if (!userDomain.Contains('@'))
+        //        return false;
 
-            var domain = userDomain.Trim().Split('@')[1];
-            var userName = userDomain.Trim().Split('@')[0];
-            if (domain.Length == 0)
-                return false;
+        //    var domain = userDomain.Trim().Split('@')[1];
+        //    var userName = userDomain.Trim().Split('@')[0];
+        //    if (domain.Length == 0)
+        //        return false;
 
-            if (!domainList.Contains(domain))
-                return false;
+        //    if (!domainList.Contains(domain))
+        //        return false;
 
-            var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
-            foreach (var user in userdata)
-            {
-                var userAndPassword = user.Split(new char[] { ':' });
-                if (userName.Equals(userAndPassword[0]) && password.Equals(userAndPassword[1])) ;
-                return true;
-            }
-            return false;
-        }
+        //    var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
+        //    foreach (var user in userdata)
+        //    {
+        //        var userAndPassword = user.Split(new char[] { ':' });
+        //        if (userName.Equals(userAndPassword[0]) && password.Equals(userAndPassword[1])) ;
+        //        return true;
+        //    }
+        //    return false;
+        //}
 
-        internal bool ValidateUser(string userDomain)
-        {
-            if (!userDomain.Contains('@'))
-                return false;
+        // deprecated
+        //internal bool ValidateUser(string userDomain)
+        //{
+        //    if (!userDomain.Contains('@'))
+        //        return false;
 
-            var domain = userDomain.Trim().Split('@')[1];
-            var username = userDomain.Trim().Split('@')[0];
+        //    var domain = userDomain.Trim().Split('@')[1];
+        //    var username = userDomain.Trim().Split('@')[0];
 
-            if (domain.Length == 0)
-                return false;
+        //    if (domain.Length == 0)
+        //        return false;
 
-            if (!domainList.Contains(domain))
-                return false;
+        //    if (!domainList.Contains(domain))
+        //        return false;
 
-            var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
-            foreach (var user in userdata)
-                if (username.Equals(user.Split(':')[0]))
-                    return true;
+        //    var userdata = File.ReadAllLines("domains/" + domain + "/userdata.txt");
+        //    foreach (var user in userdata)
+        //        if (username.Equals(user.Split(':')[0]))
+        //            return true;
 
-            return false;
-        }
+        //    return false;
+        //}
 
-        public void AddDomain(string domain)
-        {
-            File.AppendAllText("domains.txt", domain + Environment.NewLine);
-            Directory.CreateDirectory("domains/" + domain);
-            domainList.Add(domain);
-        }
-
-        public void AddUserToDomain(string username, string password, string domain)
-        {
-            File.AppendAllText("domains/" + domain + "/userdata.txt", username + ":" + password + Environment.NewLine);
-            Directory.CreateDirectory("domains/" + domain + "/" + username);
-            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
-            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
-            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
-            Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
-        }
+        // deprecated
+        //public void AddUserToDomain(string username, string password, string domain)
+        //{
+        //    File.AppendAllText("domains/" + domain + "/userdata.txt", username + ":" + password + Environment.NewLine);
+        //    Directory.CreateDirectory("domains/" + domain + "/" + username);
+        //    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Inbox");
+        //    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Sent");
+        //    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Drafts");
+        //    Directory.CreateDirectory("domains/" + domain + "/" + username + "/Trash");
+        //}
 
         public int MaxMessageSize
         {
